@@ -1,0 +1,23 @@
+[
+  {"cert":"PenTest+","code":"PT0-002 1.1","domain":"Planning and Scoping","description":"Compare and contrast governance, risk, and compliance concepts."},
+  {"cert":"PenTest+","code":"PT0-002 1.2","domain":"Planning and Scoping","description":"Explain the importance of scoping and organizational/customer requirements."},
+  {"cert":"PenTest+","code":"PT0-002 2.1","domain":"Information Gathering","description":"Given a scenario, perform passive reconnaissance."},
+  {"cert":"PenTest+","code":"PT0-002 2.2","domain":"Information Gathering","description":"Given a scenario, perform active reconnaissance."},
+  {"cert":"PenTest+","code":"PT0-002 2.4","domain":"Vulnerability Scanning","description":"Given a scenario, perform vulnerability scanning."},
+  {"cert":"PenTest+","code":"PT0-002 3.1","domain":"Attacks and Exploits","description":"Given a scenario, research attack vectors and perform network attacks."},
+  {"cert":"PenTest+","code":"PT0-002 3.2","domain":"Attacks and Exploits","description":"Given a scenario, research attack vectors and perform wireless attacks."},
+  {"cert":"PenTest+","code":"PT0-002 3.3","domain":"Attacks and Exploits","description":"Given a scenario, research attack vectors and perform application-based attacks."},
+  {"cert":"PenTest+","code":"PT0-002 3.5","domain":"Attacks and Exploits","description":"Explain common attacks and vulnerabilities against specialized systems."},
+  {"cert":"PenTest+","code":"PT0-002 4.1","domain":"Reporting and Communication","description":"Given a scenario, use report writing and handling best practices."},
+  {"cert":"Security+","code":"SY0-701 1.1","domain":"General Security Concepts","description":"Compare and contrast various types of security controls."},
+  {"cert":"Security+","code":"SY0-701 2.4","domain":"Threats, Vulnerabilities, and Mitigations","description":"Given a scenario, analyze indicators of malicious activity."},
+  {"cert":"Security+","code":"SY0-701 4.3","domain":"Security Operations","description":"Explain various activities associated with vulnerability management."},
+  {"cert":"Security+","code":"SY0-701 4.4","domain":"Security Operations","description":"Explain security alerting and monitoring concepts and tools."},
+  {"cert":"Security+","code":"SY0-701 4.8","domain":"Security Operations","description":"Explain appropriate incident response activities."},
+  {"cert":"CEH","code":"CEH-02","domain":"Reconnaissance","description":"Footprinting and reconnaissance techniques."},
+  {"cert":"CEH","code":"CEH-03","domain":"Scanning Networks","description":"Network scanning techniques and countermeasures."},
+  {"cert":"CEH","code":"CEH-04","domain":"Enumeration","description":"Enumeration techniques and countermeasures."},
+  {"cert":"CEH","code":"CEH-06","domain":"System Hacking","description":"System hacking methodology, steganography, and covering tracks."},
+  {"cert":"CEH","code":"CEH-13","domain":"Web Application Hacking","description":"Hacking web applications and web application attack methodology."},
+  {"cert":"CEH","code":"CEH-14","domain":"SQL Injection","description":"SQL injection attacks and injection detection tools."}
+]

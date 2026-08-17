@@ -1,0 +1,48 @@
+# Per-session range template (reference).
+#
+# The Range Orchestrator normally provisions targets programmatically via the
+# Docker Engine API (internal DockerDriver), creating one internal, egress-
+# denied network per session. This file documents the equivalent compose shape
+# for a single manual range and for CI smoke tests.
+#
+# Key isolation property: the range network has internal: true, so Docker
+# attaches NO gateway to the WAN. Targets can only be reached from the Kali
+# attacker box on the same network, which itself is only reachable through the
+# platform's browser-terminal proxy — never direct student SSH.
+name: cyberrange-range
+
+services:
+  kali:
+    image: cyberrange/kali-attacker:latest
+    hostname: kali-attacker
+    command: ["sleep", "infinity"]
+    cap_add: [NET_RAW, NET_ADMIN]
+    networks: [range]
+    mem_limit: 2048m
+    cpus: 2.0
+
+  metasploitable2:
+    image: tleemcjr/metasploitable2:latest
+    hostname: metasploitable2
+    networks: [range]
+    mem_limit: 1024m
+
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    hostname: dvwa
+    networks: [range]
+    mem_limit: 512m
+
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    hostname: juice-shop
+    networks: [range]
+    mem_limit: 1024m
+
+networks:
+  range:
+    driver: bridge
+    internal: true          # <-- no route to the public internet
+    ipam:
+      config:
+        - subnet: 10.66.200.0/24

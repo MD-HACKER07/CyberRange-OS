@@ -1,0 +1,640 @@
+================================================================================
+PROJECT SPECIFICATION
+CyberRange OS — AI-Augmented Red Team / Blue Team Training Platform
+For: Department Cybersecurity Lab (NBA/NAAC-aligned, locally hosted LLMs)
+================================================================================
+
+HOW TO USE THIS DOCUMENT
+--------------------------------------------------------------------------------
+This is a complete build specification for an AI coding agent (Claude Code or
+equivalent). Build a REAL, production-grade, fully functional system — no
+placeholder pages, no "coming soon" screens, no mock/fake data pretending to be
+live data, no stubbed-out API responses. Every module listed below must be
+wired end-to-end: real database, real auth, real LLM calls to a local model
+endpoint, real log ingestion, real container/VM orchestration for the range.
+If a piece of infrastructure (e.g. a GPU host running Ollama) is not available
+at build time, build the integration code against the real API contract of
+that service and make the endpoint URL configurable via .env — do not fake the
+response shape.
+
+--------------------------------------------------------------------------------
+SECTION 1 — PROJECT OBJECTIVE & CONTEXT
+--------------------------------------------------------------------------------
+Build "CyberRange OS": a self-hosted web platform that lets Cybersecurity
+students in a college department practice, under supervision, both:
+
+  1. OFFENSIVE security work (recon, exploitation, reporting) against an
+     isolated, intentionally-vulnerable target range.
+  2. DEFENSIVE security work (log analysis, threat detection, incident
+     response) using a real SOC-style workflow.
+
+Every exercise is assisted by a locally-hosted, open-weight LLM (never a
+cloud API) so no student data, lab logs, or exploit attempts leave the
+institution's network. The platform must produce structured evidence
+(attempt logs, scores, rubric-graded reports, time-to-detect metrics) that
+maps to Course Outcomes (CO) and Programme Outcomes (PO) for NBA
+accreditation, and aggregate research/innovation evidence for NAAC.
+
+Target roles the platform must serve: Student, Faculty/Instructor,
+Lab Admin (super-admin), and an optional Auditor/HoD read-only role for
+accreditation reviewers.
+
+--------------------------------------------------------------------------------
+SECTION 2 — SCOPE & GUARDRAILS (NON-NEGOTIABLE)
+--------------------------------------------------------------------------------
+- The Red Team range ONLY ever points at pre-provisioned, isolated targets
+  inside the lab's own container/VM network (Metasploitable2/3, DVWA,
+  OWASP Juice Shop, WebGoat, custom vulnerable images). The platform must
+  make it structurally impossible to enter an arbitrary external IP/host as
+  an attack target — target selection is a dropdown of pre-registered range
+  assets only, never a free-text host field.
+- The range network has NO route to the public internet (egress-denied
+  VLAN). Document this requirement explicitly in the infra section; the
+  orchestration code must provision targets on an isolated Docker network /
+  VLAN with no default gateway to WAN.
+- The "LLM pentest agent" NEVER auto-executes an exploit. It proposes a next
+  action (a specific Nmap flag set, a Metasploit module + options, a Burp
+  test) and the student must click "Approve & Run" before anything executes
+  against a target. Every approved action is logged with timestamp,
+  student ID, target, and full command.
+- All LLM calls go to a local inference endpoint (Ollama / vLLM / TGI)
+  configured via LLM_BASE_URL — never to a third-party cloud API.
+- This spec does not include, and the agent building it must not generate,
+  actual exploit payload code, novel vulnerability content, or attack
+  scripts targeting anything outside the named intentionally-vulnerable lab
+  images. Tool integration = orchestration/wrapper code around existing,
+  publicly documented tools (Nmap, Metasploit, Suricata, Zeek, Wazuh), not
+  new offensive capability.
+
+--------------------------------------------------------------------------------
+SECTION 3 — USER ROLES & PERMISSIONS
+--------------------------------------------------------------------------------
+STUDENT
+  - Enroll in a course/batch, join scheduled range sessions
+  - Use Red Team console (recon/exploit workflow + LLM copilot)
+  - Use Blue Team console (SIEM dashboard, alert triage + LLM copilot)
+  - Submit reports, view own CO/PO attainment, view own leaderboard rank
+
+FACULTY / INSTRUCTOR
+  - Everything a student can view, read-only, across their batch
+  - Create exercises, attach rubrics, map exercises to CO/PO codes
+  - Grade submitted reports (manual override of AI-suggested grade)
+  - View class-wide dashboards: MTTD/MTTR, completion rates, CO/PO heatmap
+  - Approve/reject student range-session requests
+
+LAB ADMIN (super-admin)
+  - Provision/decommission range targets (spin up/down containers/VMs)
+  - Manage LLM model registry (which local models are available, per-module)
+  - Manage users, courses, batches, RBAC
+  - View full audit log of every action platform-wide
+  - Configure network isolation policy, session timeouts, resource quotas
+
+AUDITOR (read-only)
+  - View aggregated CO/PO/NAAC evidence exports only, no student PII beyond
+    roll number, no console access
+
+--------------------------------------------------------------------------------
+SECTION 4 — HIGH-LEVEL ARCHITECTURE
+--------------------------------------------------------------------------------
+Monorepo, service-oriented, deployable fully on-prem.
+
+  [Next.js Web App] <--HTTPS/WSS--> [Go/Fiber API Gateway]
+                                          |
+        +---------------+---------------+---------------+-----------------+
+        |               |               |               |                 |
+  [Auth Service]  [Range Orchestrator] [LLM Gateway] [Log Ingest Svc]  [Analytics Svc]
+        |               |               |               |                 |
+  [PostgreSQL]    [Docker/Proxmox API] [Ollama/vLLM]  [Wazuh/ELK API]  [PostgreSQL +
+  (users, RBAC)   (target VMs/         (local LLM      (SIEM/IDS       pgvector for
+                   containers,          endpoint,       events, from    report
+                   snapshots, VLANs)    per-module       Suricata/Zeek)  similarity /
+                                        system prompts)                  RAG grading)
+        |
+  [Redis] — sessions, rate limiting, pub/sub for live console + alert streams
+
+Realtime channels (WebSocket via Redis pub/sub):
+  - Red Team console: live command output streaming, LLM copilot chat
+  - Blue Team console: live alert feed from SIEM, MTTD countdown timers
+  - Faculty dashboard: live class progress
+
+--------------------------------------------------------------------------------
+SECTION 5 — TECH STACK
+--------------------------------------------------------------------------------
+Backend API:       Go + Fiber (matches existing departmental stack conventions)
+Frontend:           Next.js (App Router) + TypeScript + Tailwind CSS
+Realtime:            WebSockets via Fiber websocket middleware + Redis pub/sub
+Primary DB:          PostgreSQL 16 with pgvector extension (RAG over past
+                     reports/exercises, semantic search of MITRE technique
+                     descriptions)
+Cache/Queue:         Redis (sessions, job queue for orchestration tasks,
+                     pub/sub for live streams)
+Auth:                JWT (access + refresh) + institution SSO (SAML/OAuth2
+                     against college identity provider) with fallback local
+                     email/roll-number + password
+Local LLM runtime:   Ollama (dev) / vLLM (production, GPU server) serving
+                     open-weight models (e.g. Llama 3.1/3.3, Qwen2.5,
+                     Mistral) — selectable per module in Admin panel
+Range orchestration: Docker Engine API (dev/small lab) with an abstraction
+                     layer allowing a Proxmox VE API driver (production,
+                     full VM isolation) — implement both drivers behind one
+                     RangeProvisioner interface
+SIEM/log stack:      Wazuh (agent + manager) OR ELK (Elasticsearch,
+                     Logstash, Kibana) — integrate via their REST APIs, pick
+                     Wazuh as default (lighter footprint, built-in agent)
+IDS:                 Suricata (EVE JSON output ingested by Log Ingest Svc)
+Offensive tooling:   Kali Linux container image with Nmap, Metasploit
+                     Framework, Burp Suite CE pre-installed; exposed to the
+                     student via a browser-based terminal (ttyd / ttydsix or
+                     Apache Guacamole for full desktop + Burp GUI)
+AI red-teaming:      PyRIT and Garak run as scheduled/on-demand jobs against
+                     the local LLM endpoint itself, results stored and
+                     shown in a dedicated "AI Security" module
+Reporting/export:    PDF generation (wkhtmltopdf or headless Chromium) for
+                     pentest reports, incident reports, and NBA/NAAC
+                     attainment reports
+Containerization:    Docker Compose for the whole platform; each range
+                     target is itself an isolated container/VM
+CI/observability:    Prometheus + Grafana for platform + range host metrics;
+                     structured JSON logging (zerolog/zap) shipped to the
+                     same Wazuh/ELK stack used for the SOC module (dogfooding)
+
+--------------------------------------------------------------------------------
+SECTION 6 — UI/UX DESIGN SYSTEM
+--------------------------------------------------------------------------------
+Theme name: "Vault" — dark hacker-terminal aesthetic, high contrast,
+confident and serious (this is a security operations tool, not a toy).
+
+COLOR PALETTE (CSS variables, define in tailwind.config + globals.css)
+  --color-black:        #0A0A0B   (base background, near-true black)
+  --color-black-soft:   #17171A   (elevated surfaces / cards)
+  --color-white:        #F5F3EE   (primary text — warm off-white, not pure
+                                    white, easier on eyes on black)
+  --color-gold:         #D4AF37   (primary accent — brand, active states,
+                                    key metrics, CTA buttons)
+  --color-gold-bright:  #F4CD5C   (hover states, highlights, glow)
+  --color-red:          #C41E3A   (danger, Red Team module accent, critical
+                                    alerts, destructive actions)
+  --color-red-deep:      #8B0000   (Red Team module background tint,
+                                    high-severity badges)
+  --color-blue-slate:   #2E3440   (neutral borders/dividers only — never a
+                                    dominant color, keeps focus on the 4
+                                    core colors)
+
+USAGE RULES
+  - Global chrome (nav, base background) = black + gold accents.
+  - Red Team module = black background, red as the dominant accent
+    (headers, active-target glow, exploit-severity badges), gold reserved
+    for score/XP elements only.
+  - Blue Team module = black background, gold as the dominant accent
+    (calmer, "defender" feel), red reserved strictly for active/unresolved
+    alerts so it reads as urgency, not decoration.
+  - White/off-white for all body text on dark surfaces; never white text on
+    gold (use black-soft text on gold buttons for contrast/accessibility).
+  - Maintain WCAG AA contrast: verify gold-on-black and red-on-black text
+    combinations pass 4.5:1 for body text; use larger/bold weight for any
+    borderline combination.
+
+TYPOGRAPHY
+  - Display/headers: a geometric sans (e.g. "Space Grotesk" or "Sora")
+  - Body: Inter or IBM Plex Sans
+  - Monospace (terminal output, logs, code, hashes, IPs): "JetBrains Mono"
+    or "IBM Plex Mono" — used throughout the Red/Blue consoles for anything
+    that is literal machine output, to visually separate "system truth"
+    from "UI chrome"
+
+VISUAL LANGUAGE
+  - Subtle scanline/grid texture on hero/landing surfaces only (not on
+    working dashboards — keep those clean for readability during real use)
+  - Thin 1px gold or red borders (module-dependent) on cards, not heavy
+    drop shadows — flat, precise, "control room" feel
+  - Live data (terminal streams, alert feed, MTTD timers) gets a subtle
+    pulsing glow on the accent color to signal "live"
+  - Severity badges: Critical = red-deep bg / white text, High = red / black
+    text, Medium = gold / black text, Low = blue-slate / white text,
+    Info = outlined, no fill
+  - Icons: line-style icons (lucide-react), gold or red per module,
+    never mixed within the same icon
+  - Charts (MTTD/MTTR trend, CO/PO attainment radar, leaderboard bars):
+    gold/red/white on black background, gridlines in low-opacity
+    blue-slate, no default chart-library rainbow palettes
+
+KEY SCREENS TO DESIGN
+  1. Landing/login — split screen, left = brand/mission statement on black
+     with gold wordmark and a faint animated network-graph background;
+     right = auth form
+  2. Student home — course/batch cards, "Active Range Session" card if one
+     is running, CO/PO progress rings, leaderboard snippet
+  3. Red Team Console — 3-pane layout: target list (left), live terminal +
+     LLM copilot chat (center), MITRE ATT&CK technique tracker + notes
+     (right)
+  4. Blue Team Console — SIEM alert stream (left, scrollable, severity
+     color-coded), selected alert detail + LLM copilot summarization
+     (center), MTTD/MTTR live timer + playbook checklist (right)
+  5. Faculty Dashboard — class heatmap of CO/PO attainment, exercise
+     completion table, grading queue
+  6. Admin Panel — range target provisioning, LLM model registry, user/RBAC
+     management, full audit log viewer
+  7. AI Security module — PyRIT/Garak scan results, vulnerability class
+     breakdown for the locally hosted LLM
+  8. Report viewer/editor — Markdown-based report editor with live PDF
+     preview, MITRE technique auto-tagging suggestions from the LLM
+
+Build this as a proper design system: a shared `ui/` package of reusable
+Tailwind + shadcn/ui-based components (Card, Badge, Terminal, AlertRow,
+StatRing, Timer, DataTable) — do not hand-roll one-off styles per page.
+
+--------------------------------------------------------------------------------
+SECTION 7 — MODULE: AUTH & IDENTITY
+--------------------------------------------------------------------------------
+- Institution SSO (SAML2 or OAuth2/OIDC against college IdP) as primary
+  login; local email+password as fallback for lab-only accounts
+- Roles: student, faculty, admin, auditor (see Section 3)
+- Batch/course enrollment model: Course -> Batch -> Student (many-to-many
+  via enrollment table), Faculty assigned to Batch
+- JWT access token (15 min) + refresh token (7 days, rotated, stored
+  httpOnly cookie)
+- Full audit trail: every privileged action (provision target, grade
+  override, RBAC change) written to an append-only audit_log table
+
+--------------------------------------------------------------------------------
+SECTION 8 — MODULE: RED TEAM RANGE
+--------------------------------------------------------------------------------
+Exercise model: a Faculty-authored "Range Exercise" bundles:
+  - One or more pre-built vulnerable target images (Metasploitable2/3, DVWA,
+    Juice Shop, WebGoat, or a custom Dockerfile the Faculty uploads)
+  - A scenario brief (Markdown, shown to student)
+  - A rubric mapped to MITRE ATT&CK tactics expected to be demonstrated
+  - CO/PO codes this exercise evidences
+  - Time limit / session duration
+
+Session lifecycle:
+  1. Student requests a session for an exercise -> Range Orchestrator spins
+     up the target container(s) + a dedicated Kali attacker container on an
+     isolated per-session Docker network (egress-denied) -> browser
+     terminal (ttyd/Guacamole) connects student to the Kali box
+  2. Student works in real Nmap/Metasploit/Burp against the live target(s)
+  3. LLM Pentest Copilot (side panel chat) reads the student's latest
+     terminal output (structured, not screen-scraped — capture stdout of
+     each executed command) plus the scenario brief, and suggests a next
+     action with a one-line rationale citing the relevant MITRE technique.
+     Every suggestion has an "Approve & Run" button (executes the exact
+     command server-side in the student's Kali container and streams
+     output back) and a "Modify" option (student edits the command before
+     running). The copilot NEVER runs anything without this explicit click.
+  4. All executed commands + timestamps + outputs are persisted
+     (session_command_log table) — this is the primary evidence artifact.
+  5. On session end (student action or time limit), the orchestrator tears
+     down containers, snapshots logs, and prompts the student into the
+     Report Editor pre-populated with a MITRE-tagged timeline of their
+     session.
+  6. Report submission triggers automatic CO/PO evidence tagging
+     (Section 13) and enters the Faculty grading queue.
+
+Also build: an "AI red-teaming extension" toggle on capable exercises where
+PyRIT/Garak scans are run against the LOCAL LLM COPILOT ITSELF (not the
+range targets) so students see how prompt-injection/jailbreak attempts
+against an AI system are structured — results surface in the AI Security
+module (Section 11), not in the target range.
+
+--------------------------------------------------------------------------------
+SECTION 9 — MODULE: BLUE TEAM SOC
+--------------------------------------------------------------------------------
+- Wazuh manager + Suricata deployed against the same range network so Red
+  Team exercises generate real telemetry Blue Team students triage
+  (attack-defense pairing per exercise, as specified by the department)
+- Log Ingest Service polls/streams Wazuh alerts + Suricata EVE JSON,
+  normalizes to a common Alert schema, writes to Postgres, and publishes to
+  Redis pub/sub for the live console
+- Blue Team Console: live alert feed (severity color-coded per Section 6),
+  click an alert to open detail view with raw log, source/dest IPs, rule
+  matched, and MITRE technique auto-mapped
+- LLM SOC Copilot: given the selected alert + surrounding context (recent
+  alerts from the same source IP), generates (a) a plain-language summary,
+  (b) a true-positive/false-positive likelihood with reasoning, (c) a
+  suggested next triage step, (d) a draft incident-report paragraph the
+  student can accept/edit. Every AI output is labeled "AI-suggested,
+  verify before submitting" and stored alongside the student's actual
+  decision so accuracy can be measured against copilot suggestions over
+  time (this comparison itself becomes attainment evidence)
+- MTTD (mean time to detect) starts when the paired Red Team action that
+  should trigger the alert occurred; MTTR (mean time to respond) stops when
+  the student marks the alert "Resolved" with a written response. Both
+  timers shown live and logged per session.
+- Playbook library: Faculty-authored Markdown playbooks, one per exercise
+  pairing (e.g. "SQLi on Juice Shop -> expected Suricata rule ID + response
+  steps"), shown as a checklist the student works through
+- Evaluate LLM copilot quality against CyberSOCEval-style scoring: store
+  ground-truth labels per alert (Faculty-set) vs. copilot suggestion vs.
+  student decision, expose an accuracy dashboard to Faculty/Admin
+
+--------------------------------------------------------------------------------
+SECTION 10 — MODULE: LOCAL LLM GATEWAY
+--------------------------------------------------------------------------------
+- Single internal service all other modules call through — nothing in the
+  frontend or other services talks directly to Ollama/vLLM
+- Config-driven model registry: Admin panel lets Lab Admin register
+  available local models (name, endpoint, context window, which
+  module(s) it's approved for: pentest-copilot / soc-copilot /
+  report-grading / red-teaming-target)
+- Per-module system prompts stored in DB (editable by Admin), versioned,
+  every LLM call logs which prompt version was used (accreditation
+  evidence requires reproducibility)
+- Strict input/output logging (full prompt + completion) retained per
+  institution data-retention policy — this is what proves "no data leaves
+  the institution": show an Admin-visible network-egress assertion (the
+  gateway refuses to initialize if LLM_BASE_URL resolves to a public IP)
+- Rate limiting + per-session token budget to control GPU load with many
+  concurrent students
+- Streaming responses (SSE or WebSocket) so the copilot chat feels live
+
+--------------------------------------------------------------------------------
+SECTION 11 — MODULE: AI RED-TEAMING / AI SECURITY
+--------------------------------------------------------------------------------
+- Scheduled + on-demand jobs that run PyRIT and Garak probe suites against
+  the institution's own local LLM endpoint (the same model powering the
+  copilots)
+- Results dashboard: vulnerability categories (prompt injection, jailbreak,
+  data leakage, toxic generation, etc.), pass/fail per probe, trend over
+  model versions as Admin swaps in new local models
+- This module is explicitly framed as "testing our own AI system," not a
+  tool for attacking third-party systems — the target endpoint field is
+  locked to the registered local LLM_BASE_URL values from Section 10, not
+  free text
+- Findings feed back into the LLM Gateway system-prompt hardening loop
+  (Admin can view a probe result and directly open the corresponding system
+  prompt for editing)
+
+--------------------------------------------------------------------------------
+SECTION 12 — MODULE: MITRE ATT&CK ENGINE
+--------------------------------------------------------------------------------
+- Ingest the public MITRE ATT&CK STIX/JSON dataset at build/seed time into
+  Postgres (tactics, techniques, sub-techniques)
+- pgvector embeddings of technique descriptions to power semantic
+  auto-tagging: given a student's session command log or a SIEM alert rule
+  name, suggest the most likely ATT&CK technique(s)
+- Every Red Team session and every Blue Team alert resolution ends up
+  tagged with technique IDs — this tagging is the backbone of both the
+  student's report and the CO/PO evidence mapping
+- Technique tracker UI component (right panel in Red Team Console) shows a
+  checklist of techniques the current exercise expects to be demonstrated,
+  lighting up as the student's actions get auto-tagged
+
+--------------------------------------------------------------------------------
+SECTION 13 — MODULE: ACCREDITATION ANALYTICS (CO/PO, NBA/NAAC)
+--------------------------------------------------------------------------------
+- Data model: Course -> Course Outcomes (CO1..COn) -> mapped to Programme
+  Outcomes (PO1..POn) per the standard NBA CO-PO mapping matrix (Faculty
+  configures the matrix per course, with attainment weightage)
+- Every graded exercise/report contributes an attainment data point per CO
+  it was tagged with (Faculty sets CO mapping when authoring the exercise,
+  Section 8)
+- Attainment calculation: direct attainment from rubric scores + indirect
+  attainment placeholder for course-exit surveys (build a simple survey
+  module: Faculty creates a survey, students respond, results feed the
+  indirect-attainment formula) — implement the standard weighted-average
+  direct/indirect attainment formula (configurable weights, e.g. 80/20),
+  computed per CO then rolled up to PO via the mapping matrix
+  - CO/PO attainment heatmap (Faculty + Admin + Auditor view)
+  - Exportable NBA-format attainment report (PDF/Excel) per course, per
+    batch, per academic year
+- NAAC research/innovation evidence: auto-compile a report listing student
+  projects, CTF results (link out to the department's existing CTF
+  platform data if available), AI-security findings count, and range usage
+  statistics as innovation/extension-activity evidence, exportable as PDF
+
+--------------------------------------------------------------------------------
+SECTION 14 — MODULE: CERTIFICATION-ALIGNED LEARNING PATHS
+--------------------------------------------------------------------------------
+- Faculty can tag exercises against certification objective codes for
+  CompTIA PenTest+, CompTIA Security+, and CEH (store the public objective
+  lists as seed data, e.g. "PenTest+ 2.0 Objective 3.2")
+- Student-facing "Learning Path" view: progress bars per certification
+  showing which objectives have been covered by completed exercises,
+  gap list of uncovered objectives
+- Not a certification itself — clearly labeled "in-house competency
+  mapping," no claim of official certification-body affiliation
+
+--------------------------------------------------------------------------------
+SECTION 15 — MODULE: GAMIFICATION & LEADERBOARD
+--------------------------------------------------------------------------------
+- XP/points per completed exercise, weighted by difficulty and by whether
+  the student needed copilot assistance (higher points for less-assisted
+  solves, to incentivize genuine skill building — store an
+  "assistance_ratio" per session: approved-suggestions / total-actions)
+- Batch leaderboard (Red Team, Blue Team, combined) with the gold/red badge
+  styling from Section 6
+- Optional: hook into the department's existing CTF platform data
+  (CyberSpaceVR / SPACECTF / ZeroBreach-style events) as an additional
+  leaderboard feed if an integration endpoint is available — build this as
+  a pluggable data source, not a hard dependency
+
+--------------------------------------------------------------------------------
+SECTION 16 — MODULE: FACULTY / ADMIN CONTROL PANEL
+--------------------------------------------------------------------------------
+- Range target provisioning UI: pick base image, resource limits (CPU/RAM),
+  network policy, snapshot/reset controls, view live resource usage per
+  active session
+- LLM model registry management (Section 10)
+- User/RBAC management, batch/course setup, CO-PO matrix editor
+- Full audit log viewer with filters (user, action type, date range,
+  severity) and CSV export
+- System health dashboard: active sessions, GPU utilization for the LLM
+  host, Wazuh/Suricata ingest health, storage usage
+
+--------------------------------------------------------------------------------
+SECTION 17 — MODULE: REPORTING ENGINE
+--------------------------------------------------------------------------------
+- Markdown-based report editor (student-facing) with live PDF preview,
+  auto-inserted session timeline + MITRE tags + screenshots the student
+  uploads
+- Faculty grading view: rubric-driven scoring UI, side-by-side with the
+  AI-suggested grade (from an LLM grading assistant call that scores
+  against the rubric text — clearly labeled as a suggestion, Faculty score
+  is authoritative and always overridable)
+- Incident report template auto-generated from a Blue Team session
+  (alert timeline, MTTD/MTTR, response actions taken, root cause field)
+- PDF export for both report types, and a combined "portfolio PDF" per
+  student for placement/interview use (their own real work, exportable) —
+  this doubles as a differentiator for student job applications
+
+--------------------------------------------------------------------------------
+SECTION 18 — DATABASE SCHEMA (core tables, Postgres)
+--------------------------------------------------------------------------------
+users(id, role, name, roll_no, email, batch_id, auth_provider, created_at)
+courses(id, code, name, semester)
+course_outcomes(id, course_id, code, description)
+po_mapping(co_id, po_code, weight)
+batches(id, course_id, faculty_id, name, term)
+enrollments(user_id, batch_id)
+exercises(id, batch_id, type[red|blue], title, brief_md, rubric_json,
+          co_ids[], cert_objective_codes[], target_image_refs[],
+          time_limit_minutes, created_by)
+range_sessions(id, exercise_id, user_id, status, network_id,
+                started_at, ended_at, assistance_ratio)
+session_command_log(id, session_id, seq, command, output, mitre_technique_id,
+                     was_ai_suggested, approved_at)
+siem_alerts(id, session_id, source, rule_id, severity, raw_log,
+            mitre_technique_id, detected_at, resolved_at, resolution_note,
+            ground_truth_label, ai_suggested_label, student_label)
+mitre_techniques(id, tactic, technique_id, name, description, embedding)
+reports(id, session_id, type[pentest|incident], content_md, ai_suggested_score,
+        faculty_score, faculty_feedback, status, submitted_at, graded_at)
+llm_prompts(id, module, version, system_prompt, active, updated_by)
+llm_calls(id, module, prompt_version, model, input, output, tokens, latency_ms,
+          user_id, created_at)
+ai_redteam_scans(id, model, tool[pyrit|garak], probe_category, result_json,
+                  passed, run_at)
+attainment_snapshots(id, co_id, batch_id, direct_score, indirect_score,
+                      computed_at)
+audit_log(id, actor_id, action, target_type, target_id, metadata_json,
+          created_at)
+leaderboard_entries(id, user_id, batch_id, xp, rank, updated_at)
+
+--------------------------------------------------------------------------------
+SECTION 19 — API SURFACE (representative, REST + WS)
+--------------------------------------------------------------------------------
+POST   /api/auth/login | /refresh | /logout
+GET    /api/me
+CRUD   /api/courses, /api/batches, /api/exercises
+POST   /api/range-sessions              (start a session)
+POST   /api/range-sessions/:id/end
+WS     /ws/range-sessions/:id/terminal  (live command stream)
+POST   /api/range-sessions/:id/copilot/suggest
+POST   /api/range-sessions/:id/copilot/execute   (Approve & Run)
+GET    /api/siem/alerts?session_id=
+POST   /api/siem/alerts/:id/copilot/summarize
+POST   /api/siem/alerts/:id/resolve
+WS     /ws/siem/alerts/live
+CRUD   /api/reports, POST /api/reports/:id/submit, POST /api/reports/:id/grade
+GET    /api/attainment/co/:co_id | /api/attainment/export
+GET    /api/leaderboard/:batch_id
+CRUD   /api/admin/llm-models, /api/admin/llm-prompts
+POST   /api/admin/range-targets, DELETE /api/admin/range-targets/:id
+GET    /api/admin/audit-log
+POST   /api/ai-security/scan, GET /api/ai-security/results
+
+--------------------------------------------------------------------------------
+SECTION 20 — INFRASTRUCTURE, NETWORK ISOLATION & SAFETY
+--------------------------------------------------------------------------------
+- Three logical networks minimum:
+  1. Platform network — web app, API, DB, Redis (normal institution LAN
+     access for students/faculty)
+  2. Range network — per-session isolated Docker network/VLAN, egress
+     denied to WAN, only reachable from the platform via the orchestrator
+     API and the browser-terminal proxy (never direct student SSH)
+  3. LLM/GPU network — hosts Ollama/vLLM, reachable only from the LLM
+     Gateway service, not directly from the internet or from range targets
+- RangeProvisioner interface with two drivers: DockerDriver (dev/small
+  scale) and ProxmoxDriver (production, full VM-level isolation) —
+  implement DockerDriver first, stub ProxmoxDriver behind the same
+  interface for later completion
+- Snapshot/reset: every target image has a golden snapshot; session end
+  always destroys and rebuilds from golden snapshot for the next student
+  (no state leakage between students)
+- Resource quotas per session (CPU/RAM/time) enforced by the orchestrator,
+  configurable in Admin panel
+
+--------------------------------------------------------------------------------
+SECTION 21 — SECURITY, PRIVACY & AUDIT
+--------------------------------------------------------------------------------
+- All inter-service traffic over TLS, even on internal networks
+- Secrets in environment variables / a secrets manager, never committed
+- Full audit log (Section 18) is append-only, exportable, and itself
+  monitored by the Blue Team stack (dogfood the SOC module on the
+  platform's own audit events)
+- Data retention policy configurable by Admin (e.g., raw command logs kept
+  1 academic year, then archived)
+- Explicit LLM_BASE_URL public-IP check (Section 10) as a startup guard
+
+--------------------------------------------------------------------------------
+SECTION 22 — NON-FUNCTIONAL REQUIREMENTS
+--------------------------------------------------------------------------------
+- Support at least 60 concurrent student sessions (typical lab batch size)
+  on modest departmental hardware; document GPU sizing assumption for the
+  local LLM host (e.g., a single RTX 4090 / A6000 class GPU serving a
+  7B–14B quantized model comfortably for this concurrency with request
+  queuing)
+- p95 API latency < 300ms excluding LLM generation and container
+  provisioning calls
+- LLM copilot first-token latency < 3s (streaming)
+- All frontend pages responsive down to a 1366x768 lab-PC resolution;
+  mobile view for Faculty/Admin dashboards only (students use lab PCs)
+- Accessibility: WCAG AA for all non-terminal UI
+
+--------------------------------------------------------------------------------
+SECTION 23 — DEPLOYMENT (docker-compose services)
+--------------------------------------------------------------------------------
+web, api, auth, range-orchestrator, llm-gateway, log-ingest, analytics,
+postgres, redis, wazuh-manager, suricata, ollama (or vllm), guacamole (or
+ttyd), pgadmin (dev only), prometheus, grafana
+
+Provide a single `docker-compose.yml` for the platform services plus a
+separate `docker-compose.range.yml` template that the orchestrator uses
+per-session to spin up isolated target networks — keep these decoupled so
+range scaling doesn't require redeploying the platform.
+
+--------------------------------------------------------------------------------
+SECTION 24 — FOLDER STRUCTURE
+--------------------------------------------------------------------------------
+/apps
+  /web                 (Next.js)
+  /api                 (Go/Fiber gateway)
+/services
+  /auth
+  /range-orchestrator
+  /llm-gateway
+  /log-ingest
+  /analytics
+/packages
+  /ui                  (shared design system components)
+  /shared-types
+/infra
+  /docker-compose.yml
+  /docker-compose.range.yml
+  /seed                (MITRE ATT&CK data, cert objective lists)
+/docs
+  /architecture.md
+  /runbook.md
+
+--------------------------------------------------------------------------------
+SECTION 25 — BUILD PHASES
+--------------------------------------------------------------------------------
+PHASE 1 — Foundations: auth, RBAC, course/batch/exercise CRUD, design
+system, base layout for all role dashboards
+PHASE 2 — Red Team core: range orchestration (DockerDriver), browser
+terminal, session command logging, MITRE tagging engine
+PHASE 3 — LLM Gateway + Red Team copilot (suggest/approve/execute flow)
+PHASE 4 — Blue Team core: Wazuh/Suricata ingest, alert console, MTTD/MTTR
+timers, playbooks
+PHASE 5 — Blue Team copilot + CyberSOCEval-style accuracy tracking
+PHASE 6 — Reporting engine (student report editor, faculty grading, PDF
+export)
+PHASE 7 — Accreditation analytics (CO/PO matrix, attainment calc, NBA/NAAC
+exports)
+PHASE 8 — AI Security module (PyRIT/Garak integration)
+PHASE 9 — Gamification, certification learning paths, leaderboard
+PHASE 10 — Admin panel polish, audit log, observability (Prometheus/Grafana),
+hardening pass on network isolation
+
+--------------------------------------------------------------------------------
+SECTION 26 — DEFINITION OF DONE
+--------------------------------------------------------------------------------
+- A student can log in, start a real Red Team session against an actually
+  running Metasploitable/DVWA/Juice Shop container, run real Nmap/Metasploit
+  commands through the browser terminal, get real LLM-generated next-step
+  suggestions from the locally hosted model, approve and execute them, and
+  end the session with a persisted command log auto-tagged to MITRE
+  techniques.
+- The same exercise generates real Suricata/Wazuh alerts a Blue Team
+  student can triage live, with real LLM-generated summaries from the same
+  local model, and a working MTTD/MTTR timer.
+- A submitted report renders as a real downloadable PDF, gets graded by
+  Faculty against a real rubric, and the score flows into a real CO/PO
+  attainment number visible on a Faculty dashboard and exportable as a
+  report file.
+- No component in the above flow uses mock data, hardcoded fake responses,
+  or a third-party cloud LLM API. Every LLM call in the running system goes
+  to LLM_BASE_URL and that value points at a locally hosted model.
+================================================================================
+END OF SPECIFICATION
+================================================================================

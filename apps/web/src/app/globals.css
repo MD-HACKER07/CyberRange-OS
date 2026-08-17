@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-black: #0a0a0b;
+  --color-black-soft: #17171a;
+  --color-white: #f5f3ee;
+  --color-gold: #d4af37;
+  --color-gold-bright: #f4cd5c;
+  --color-red: #c41e3a;
+  --color-red-deep: #8b0000;
+  --color-slate: #2e3440;
+}
+
+html,
+body {
+  background: var(--color-black);
+  color: var(--color-white);
+  font-family: var(--font-body), Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--color-slate);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0b;
+}
+::-webkit-scrollbar-thumb {
+  background: #2e3440;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4252;
+}
+
+/* Faint scanline/grid texture reserved for hero/landing surfaces only. */
+.vault-grid {
+  background-image:
+    linear-gradient(rgba(212, 175, 55, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(212, 175, 55, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.vault-scanlines {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(245, 243, 238, 0.03),
+    rgba(245, 243, 238, 0.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+.live-dot {
+  box-shadow: 0 0 0 rgba(196, 30, 58, 0.6);
+  animation: livepulse 1.8s infinite;
+}
+@keyframes livepulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(196, 30, 58, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(196, 30, 58, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(196, 30, 58, 0);
+  }
+}
+
+.terminal-output {
+  font-family: var(--font-mono), "JetBrains Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

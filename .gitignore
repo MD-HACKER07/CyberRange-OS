@@ -1,0 +1,29 @@
+# Env / secrets
+.env
+.env.local
+*.env
+
+# Go
+/apps/api/api
+/apps/api/seed
+*.exe
+build_errors.txt
+vet_errors.txt
+
+# Node
+node_modules/
+.next/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling / scratch
+git_push.ps1
+check.ps1
+*_out.txt
+
+# Data
+/data/
+storage/
