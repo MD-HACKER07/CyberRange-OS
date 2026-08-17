@@ -23,6 +23,8 @@ Thumbs.db
 git_push.ps1
 check.ps1
 *_out.txt
+apps/api/h.json
+apps/web/tsconfig.tsbuildinfo
 
 # Data
 /data/
