@@ -1,0 +1,91 @@
+# CyberRange OS — single-server deployment (host it all on the Ubuntu box).
+#
+# Brings up the core platform: PostgreSQL (with pgvector), Redis, the Go API,
+# and the Next.js web app. It REUSES the Ollama already running natively on the
+# host (reached via host.docker.internal, which resolves to the private Docker
+# bridge gateway — so the local-inference egress guard passes without override).
+#
+# Heavy optional services (Wazuh, Suricata, Guacamole, Prometheus, Grafana)
+# live in docker-compose.yml behind their own setup; add them later.
+#
+# Usage on the server (from the repo root):
+#   docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy up -d --build
+name: cyberrange-os
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: cyberrange
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cyberrange}
+      POSTGRES_DB: cyberrange
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyberrange"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    environment:
+      APP_ENV: production
+      HTTP_ADDR: ":8080"
+      PUBLIC_URL: ${PUBLIC_URL:-http://20.0.3.198:3000}
+      DATABASE_URL: postgres://cyberrange:${POSTGRES_PASSWORD:-cyberrange}@postgres:5432/cyberrange?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.deploy}
+      # Native Ollama on the host; host.docker.internal -> private bridge gateway.
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-llama3.2:3b}
+      LLM_EMBED_MODEL: ${LLM_EMBED_MODEL:-nomic-embed-text}
+      LLM_ALLOW_PUBLIC_IP: "false"
+      LLM_REQUEST_TIMEOUT: 180s
+      RANGE_DRIVER: docker
+      DOCKER_HOST: unix:///var/run/docker.sock
+      RANGE_KALI_IMAGE: cyberrange/kali-attacker:latest
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@cyberrange.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env.deploy}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Lab Admin}
+      STORAGE_DIR: /data/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # orchestrator provisions ranges here
+      - storage:/data/storage
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      args:
+        # The Next.js server proxies /api and /ws to the API service on the
+        # compose network. This value is baked into the rewrite at build time.
+        NEXT_PUBLIC_API_BASE: http://api:8080
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:

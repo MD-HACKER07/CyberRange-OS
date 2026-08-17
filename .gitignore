@@ -1,7 +1,11 @@
 # Env / secrets
 .env
 .env.local
+.env.deploy
 *.env
+# keep the templates
+!.env.example
+!.env.deploy.example
 
 # Go
 /apps/api/api
