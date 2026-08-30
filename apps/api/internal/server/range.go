@@ -41,6 +41,7 @@ func (h *rangeHandler) register(r fiber.Router) {
 	g.Post("/:id/copilot/suggest", h.copilotSuggest)
 	g.Post("/:id/copilot/execute", h.copilotExecute)
 	g.Post("/:id/exec", h.execManual)
+	g.Get("/:id/stats", h.stats)
 
 	// Live terminal + copilot stream (token passed via ?access_token= by the browser).
 	g.Get("/:id/terminal", websocket.New(h.terminalWS))
@@ -259,6 +260,24 @@ func (h *rangeHandler) techniques(c *fiber.Ctx) error {
 		expected = ex.ExpectedTechniques
 	}
 	return httpx.OK(c, fiber.Map{"expected": expected, "demonstrated": demonstrated})
+}
+
+// stats returns live CPU/RAM usage for the session's containers.
+func (h *rangeHandler) stats(c *fiber.Ctx) error {
+	sess, err := h.loadOwnedSession(c)
+	if err != nil {
+		return err
+	}
+	if h.d.provisioner == nil || sess.Status != "running" {
+		return httpx.OK(c, fiber.Map{"stats": map[string]any{}})
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), 8*time.Second)
+	defer cancel()
+	stats, err := h.d.provisioner.Stats(ctx, sessionToRange(sess))
+	if err != nil {
+		return httpx.OK(c, fiber.Map{"stats": map[string]any{}, "error": err.Error()})
+	}
+	return httpx.OK(c, fiber.Map{"stats": stats})
 }
 
 func (h *rangeHandler) end(c *fiber.Ctx) error {

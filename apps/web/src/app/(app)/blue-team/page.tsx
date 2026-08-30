@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { Bot, ShieldAlert } from "lucide-react";
 import { api, fetcher, wsURL } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { PageHeader } from "@/components/page-header";
 import { Card, SectionTitle, Button, SeverityBadge, Badge, Textarea, Spinner } from "@/components/ui";
 import type { Alert, ListResponse } from "@/lib/types";
@@ -18,10 +19,16 @@ interface CopilotResult {
   incident_paragraph: string;
 }
 
+const SEVERITIES = ["all", "critical", "high", "medium", "low"] as const;
+
 export default function BlueTeamConsole() {
-  const { data, mutate } = useSWR<ListResponse<Alert>>("/siem/alerts?unresolved=true", fetcher, {
-    refreshInterval: 10000,
-  });
+  const { user } = useAuth();
+  const isStaff = user?.role === "faculty" || user?.role === "admin";
+  const [sev, setSev] = useState<(typeof SEVERITIES)[number]>("all");
+  const [unresolvedOnly, setUnresolvedOnly] = useState(true);
+
+  const query = `/siem/alerts?${unresolvedOnly ? "unresolved=true&" : ""}${sev !== "all" ? `severity=${sev}&` : ""}limit=100`;
+  const { data, mutate } = useSWR<ListResponse<Alert>>(query, fetcher, { refreshInterval: 10000 });
   const { data: metrics } = useSWR<{ mttd_seconds: number; mttr_seconds: number }>("/siem/metrics", fetcher, {
     refreshInterval: 15000,
   });
@@ -30,6 +37,7 @@ export default function BlueTeamConsole() {
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState("");
   const [note, setNote] = useState("");
+  const [gt, setGt] = useState("");
 
   // Live alert stream.
   useEffect(() => {
@@ -49,8 +57,16 @@ export default function BlueTeamConsole() {
     setSelected(a);
     setCopilot(null);
     setLabel(a.student_label ?? "");
+    setGt(a.ground_truth_label ?? "");
     setNote("");
     await api(`/siem/alerts/${a.id}/detect`, { method: "POST" }).catch(() => {});
+  };
+
+  const saveGroundTruth = async (value: string) => {
+    if (!selected) return;
+    setGt(value);
+    await api(`/siem/alerts/${selected.id}/ground-truth`, { body: { label: value } }).catch(() => {});
+    mutate();
   };
 
   const summarize = async () => {
@@ -103,11 +119,36 @@ export default function BlueTeamConsole() {
       <div className="flex-1 grid grid-cols-12 gap-3 min-h-0">
         {/* Left: alert feed */}
         <Card className="col-span-4 overflow-auto">
-          <SectionTitle>
+          <SectionTitle
+            action={
+              <button
+                onClick={() => setUnresolvedOnly((v) => !v)}
+                className="text-xs text-vault-white/50 hover:text-vault-gold"
+              >
+                {unresolvedOnly ? "showing open" : "showing all"}
+              </button>
+            }
+          >
             <span className="flex items-center gap-2">
               <ShieldAlert size={14} /> Alert Feed
             </span>
           </SectionTitle>
+          <div className="flex flex-wrap gap-1 mb-3">
+            {SEVERITIES.map((sv) => (
+              <button
+                key={sv}
+                onClick={() => setSev(sv)}
+                className={
+                  "text-xs px-2 py-0.5 rounded capitalize border " +
+                  (sev === sv
+                    ? "border-vault-gold text-vault-gold bg-vault-gold/10"
+                    : "border-vault-slate text-vault-white/50 hover:text-vault-white")
+                }
+              >
+                {sv}
+              </button>
+            ))}
+          </div>
           <div className="space-y-2">
             {(data?.items ?? []).map((a) => (
               <button
@@ -216,6 +257,25 @@ export default function BlueTeamConsole() {
               <Button className="w-full" onClick={resolve} disabled={!note.trim()}>
                 Mark Resolved
               </Button>
+
+              {isStaff && (
+                <div className="mt-3 border-t border-vault-slate pt-3">
+                  <label className="text-xs text-vault-gold mb-1 block">Faculty ground truth (for accuracy scoring)</label>
+                  <select
+                    value={gt}
+                    onChange={(e) => saveGroundTruth(e.target.value)}
+                    className="w-full bg-black border border-vault-slate rounded px-2 py-2 text-sm"
+                  >
+                    <option value="">Not set</option>
+                    <option value="true_positive">True Positive</option>
+                    <option value="false_positive">False Positive</option>
+                    <option value="benign">Benign</option>
+                  </select>
+                  <p className="text-[10px] text-vault-white/40 mt-1">
+                    Sets the correct answer so the SOC copilot and student accuracy can be measured.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-vault-white/40">Select an alert first.</p>

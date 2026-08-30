@@ -59,6 +59,7 @@ services:
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env.deploy}
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Lab Admin}
       STORAGE_DIR: /data/storage
+      SURICATA_EVE_FILE: /var/log/suricata/eve.json
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -69,6 +70,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # orchestrator provisions ranges here
       - storage:/data/storage
+      - suricata-logs:/var/log/suricata:ro          # Blue Team reads IDS telemetry here
     restart: unless-stopped
 
   web:
@@ -85,7 +87,22 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
+  # Real IDS telemetry for the Blue Team. Suricata sniffs the host network
+  # (where the Docker range bridges live) and writes EVE JSON to a shared
+  # volume that the API's log-ingest service tails. Set SURICATA_IFACE in
+  # .env.deploy to the interface facing the range (default: docker0).
+  suricata:
+    image: jasonish/suricata:latest
+    profiles: ["soc"]
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
+    command: ["-i", "${SURICATA_IFACE:-docker0}"]
+    volumes:
+      - suricata-logs:/var/log/suricata
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
   storage:
+  suricata-logs:

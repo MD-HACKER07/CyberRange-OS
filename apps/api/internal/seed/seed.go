@@ -230,6 +230,13 @@ func (s *Seeder) SeedAll(ctx context.Context, embed bool) error {
 	if err := s.SeedMITRE(ctx, embed); err != nil {
 		return fmt.Errorf("mitre: %w", err)
 	}
+	// Ready-to-use demo course/batch/exercises so the platform is usable
+	// immediately. Skip with SEED_DEMO=false in production.
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SEED_DEMO"))) != "false" {
+		if err := s.SeedDemo(ctx); err != nil {
+			s.log.Warn().Err(err).Msg("demo content seeding incomplete")
+		}
+	}
 	return nil
 }
 

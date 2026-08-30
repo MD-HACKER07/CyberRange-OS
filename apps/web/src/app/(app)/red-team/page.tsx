@@ -124,6 +124,11 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
     fetcher,
     { refreshInterval: 5000 },
   );
+  const { data: statsData } = useSWR<{ stats: Record<string, { cpu_percent: number; mem_used_mb: number; mem_limit_mb: number }> }>(
+    session.status === "running" ? `/range-sessions/${session.id}/stats` : null,
+    fetcher,
+    { refreshInterval: 5000 },
+  );
 
   // Seed terminal with historical command log.
   useEffect(() => {
@@ -251,6 +256,17 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
           <div className="mt-4 flex items-center justify-between">
             {session.started_at && <Timer startISO={session.started_at} accent="red" />}
           </div>
+          {statsData?.stats && Object.keys(statsData.stats).length > 0 && (
+            <div className="mt-3 border-t border-vault-red/20 pt-2">
+              <div className="text-[10px] uppercase tracking-wide text-vault-white/40 mb-1">Live resources</div>
+              {Object.entries(statsData.stats).map(([name, s]) => (
+                <div key={name} className="text-xs flex items-center justify-between font-mono text-vault-white/60">
+                  <span className="truncate max-w-[7rem]">{name}</span>
+                  <span>{s.cpu_percent.toFixed(0)}% · {s.mem_used_mb.toFixed(0)}MB</span>
+                </div>
+              ))}
+            </div>
+          )}
           <Button variant="outline" className="w-full mt-3" onClick={endSession}>
             <Square size={14} /> End Session
           </Button>
@@ -282,6 +298,7 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
             ))}
           </Terminal>
         </div>
+        <ToolPalette target={session.targets?.[0]?.hostname || "TARGET"} onPick={setManualCmd} />
         <form onSubmit={runManual} className="flex gap-2">
           <Input
             value={manualCmd}
@@ -364,6 +381,36 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
           </div>
         </Card>
       </div>
+    </div>
+  );
+}
+
+// ToolPalette offers one-click templates for the standard tools installed in
+// the Kali attacker container, pre-filled with the current target hostname.
+function ToolPalette({ target, onPick }: { target: string; onPick: (cmd: string) => void }) {
+  const tools: { label: string; cmd: string }[] = [
+    { label: "Nmap quick", cmd: `nmap -sV -T4 ${target}` },
+    { label: "Nmap full", cmd: `nmap -sC -sV -p- ${target}` },
+    { label: "Ping", cmd: `ping -c 3 ${target}` },
+    { label: "HTTP headers", cmd: `curl -sI http://${target}/` },
+    { label: "Gobuster", cmd: `gobuster dir -u http://${target}/ -w /usr/share/wordlists/dirb/common.txt` },
+    { label: "Nikto", cmd: `nikto -h http://${target}/` },
+    { label: "WhatWeb", cmd: `whatweb http://${target}/` },
+    { label: "sqlmap", cmd: `sqlmap -u "http://${target}/?id=1" --batch --banner` },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tools.map((t) => (
+        <button
+          key={t.label}
+          type="button"
+          onClick={() => onPick(t.cmd)}
+          title={t.cmd}
+          className="text-xs px-2 py-1 rounded border border-vault-red/30 text-vault-white/70 hover:bg-vault-red/10 hover:text-vault-red font-mono"
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
