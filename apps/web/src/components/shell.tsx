@@ -16,6 +16,7 @@ import {
   Crosshair,
   LogOut,
   BarChart3,
+  Mic,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/cn";
@@ -31,6 +32,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
+  { href: "/assistant", label: "Assistant", icon: <Mic size={18} /> },
   { href: "/red-team", label: "Red Team", icon: <Swords size={18} />, roles: ["student", "faculty", "admin"], accent: "red" },
   { href: "/blue-team", label: "Blue Team", icon: <Radar size={18} />, roles: ["student", "faculty", "admin"] },
   { href: "/reports", label: "Reports", icon: <FileText size={18} /> },

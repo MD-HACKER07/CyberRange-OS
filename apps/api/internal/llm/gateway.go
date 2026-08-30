@@ -24,11 +24,12 @@ const (
 	ModuleReportGrading  = "report-grading"
 	ModuleMITRETagging   = "mitre-tagging"
 	ModuleRedTeamTarget  = "red-teaming-target"
+	ModuleAssistant      = "assistant"
 )
 
 var Modules = []string{
 	ModulePentestCopilot, ModuleSOCCopilot, ModuleReportGrading,
-	ModuleMITRETagging, ModuleRedTeamTarget,
+	ModuleMITRETagging, ModuleRedTeamTarget, ModuleAssistant,
 }
 
 var ErrBudgetExceeded = errors.New("session token budget exceeded")

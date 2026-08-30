@@ -25,5 +25,6 @@ func registerRoutes(d *Deps, api fiber.Router) {
 	newCertHandler(d).register(protected)
 	newMitreHandler(d).register(protected)
 	newAISecHandler(d).register(protected)
+	newAssistantHandler(d).register(protected)
 	newAdminHandler(d).register(protected)
 }
