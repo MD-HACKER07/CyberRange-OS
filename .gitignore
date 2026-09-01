@@ -30,6 +30,15 @@ check.ps1
 apps/api/h.json
 apps/web/tsconfig.tsbuildinfo
 
+# LaTeX aux
+docs/*.aux
+docs/*.out
+docs/*.toc
+docs/*.log
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.synctex.gz
+
 # Data
 /data/
 storage/
