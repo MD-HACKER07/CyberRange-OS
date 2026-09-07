@@ -25,8 +25,10 @@ Thumbs.db
 
 # Local tooling / scratch
 git_push.ps1
+gp.ps1
 check.ps1
 *_out.txt
+*_result.txt
 apps/api/h.json
 apps/web/tsconfig.tsbuildinfo
 
