@@ -39,6 +39,11 @@ docs/*.fls
 docs/*.fdb_latexmk
 docs/*.synctex.gz
 
+# Training artifacts
+training/dataset.jsonl
+training/*.gguf
+training/outputs/
+
 # Data
 /data/
 storage/
