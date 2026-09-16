@@ -1,0 +1,7 @@
+# For prepare_datasets.py (dataset download + conversion). CPU-only, small.
+datasets>=2.19.0
+huggingface_hub>=0.23.0
+
+# NOTE: Training itself runs in finetune_qlora.ipynb on a cloud GPU
+# (Colab/Kaggle), which installs its own GPU stack. You do NOT need
+# torch/unsloth/bitsandbytes locally just to prepare the dataset.

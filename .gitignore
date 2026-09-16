@@ -43,6 +43,8 @@ docs/*.synctex.gz
 
 # Training artifacts
 training/dataset.jsonl
+training/dataset_eval.jsonl
+training/enterprise-attack.json
 training/*.gguf
 training/outputs/
 
