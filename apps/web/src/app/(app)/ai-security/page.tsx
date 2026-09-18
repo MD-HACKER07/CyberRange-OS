@@ -36,7 +36,7 @@ export default function AISecurityPage() {
     <div className="p-8">
       <PageHeader
         title="AI Security"
-        subtitle="PyRIT / Garak probes run against our OWN local model — never a third-party system"
+        subtitle="PyRIT / Garak probes run against our OWN CyberSec model — never a third-party system"
         actions={
           <div className="flex gap-2">
             <select
@@ -69,7 +69,7 @@ export default function AISecurityPage() {
           </Card>
         ))}
         {Object.keys(byCategory).length === 0 && (
-          <p className="text-sm text-vault-white/40">No scans yet. Run one to probe the local model&apos;s guardrails.</p>
+          <p className="text-sm text-vault-white/40">No scans yet. Run one to probe the CyberSec model&apos;s guardrails.</p>
         )}
       </div>
 

@@ -70,6 +70,8 @@ export interface RangeSession {
   user_id: string;
   status: "provisioning" | "running" | "ending" | "completed" | "failed" | "expired";
   attacker_name: string;
+  attacker_ip: string;
+  subnet: string;
   driver: string;
   total_actions: number;
   ai_actions: number;
@@ -106,6 +108,21 @@ export interface Suggestion {
   mitre_technique_id: string;
   tool: string;
   status: string;
+}
+
+export interface AttackDef {
+  id: string;
+  label: string;
+  description: string;
+  tool: string;
+  mitre_technique_id: string;
+  severity: Severity;
+  rule_description: string;
+}
+
+export interface DiscoveredHost {
+  ip_address: string;
+  hostname: string;
 }
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";

@@ -161,7 +161,7 @@ function TargetsTab() {
 
 function ModelsTab() {
   const { data, mutate } = useSWR<ListResponse<LLMModel>>("/admin/llm-models", fetcher);
-  const [form, setForm] = useState({ name: "", endpoint: "", runtime: "ollama", modules: "" });
+  const [form, setForm] = useState({ name: "", endpoint: "", runtime: "local", modules: "" });
   const create = async () => {
     await api("/admin/llm-models", {
       body: {
@@ -191,7 +191,7 @@ function ModelsTab() {
         <SectionTitle>Register Local Model</SectionTitle>
         <div className="space-y-2">
           <Input placeholder="model name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input placeholder="http://ollama:11434" value={form.endpoint} onChange={(e) => setForm({ ...form, endpoint: e.target.value })} />
+          <Input placeholder="http://localhost:11434" value={form.endpoint} onChange={(e) => setForm({ ...form, endpoint: e.target.value })} />
           <Input placeholder="modules (comma sep)" value={form.modules} onChange={(e) => setForm({ ...form, modules: e.target.value })} />
           <Button className="w-full" onClick={create}>
             Register

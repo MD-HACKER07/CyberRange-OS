@@ -51,3 +51,24 @@ training/outputs/
 # Data
 /data/
 storage/
+
+# Scratch / scratch deploy artifacts (never commit)
+_*
+deploy/_*
+deploy/push.tar.gz
+*.tar.gz
+LOGIN_CREDENTIALS.txt
+*.pem
+*.key
+
+# Model weights (distributed via GitHub Releases, never committed to the repo)
+*.gguf
+
+# Private institutional / student data — MUST NEVER be published
+sanjivani-b-tech-cyber-security-*.json
+sanjivani_timetables.json
+*student*.json
+
+# Release build artifacts (uploaded to GitHub Releases, not committed)
+deploy/*.zip
+*.zip

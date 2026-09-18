@@ -50,6 +50,19 @@ interface RequestOpts {
   body?: unknown;
   raw?: boolean;
   retry?: boolean;
+  // When true, bypass the Next.js proxy and call the API host directly.
+  // Used for slow LLM endpoints: the Next proxy drops long upstream sockets
+  // (ECONNRESET) and returns 500 even though the API answers 200. These calls
+  // use the Bearer token (no cookie), so cross-origin is fine.
+  direct?: boolean;
+}
+
+// Direct API origin (e.g. http://SERVER:8080), derived from the WS base which
+// is already baked in at build time. Empty in local dev -> falls back to proxy.
+function directBase(): string {
+  const ws = process.env.NEXT_PUBLIC_WS_BASE;
+  if (!ws) return "";
+  return ws.replace(/^ws:/, "http:").replace(/^wss:/, "https:").replace(/\/$/, "");
 }
 
 export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Promise<T> {
@@ -57,9 +70,13 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
-  const res = await fetch(`${BASE}${path}`, {
+  const db = opts.direct ? directBase() : "";
+  const url = db ? `${db}${BASE}${path}` : `${BASE}${path}`;
+  const res = await fetch(url, {
     method: opts.method || (opts.body !== undefined ? "POST" : "GET"),
-    credentials: "include",
+    // Bearer-token calls don't need the cookie; omit credentials for direct
+    // cross-origin calls so no SameSite/CORS-credential issues arise.
+    credentials: db ? "omit" : "include",
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
@@ -114,8 +131,19 @@ export async function logout() {
 export const fetcher = <T>(path: string) => api<T>(path);
 
 // Build a WebSocket URL carrying the access token (browsers can't set WS headers).
+//
+// Next.js's rewrite proxy only forwards plain HTTP requests, not the raw
+// WebSocket upgrade handshake — so live streams connect directly to the API
+// instead of going through the /ws rewrite. NEXT_PUBLIC_WS_BASE is baked in
+// at build time (see Dockerfile / docker-compose.deploy.yml); it falls back
+// to same-origin for local dev where the API is proxied on the same host.
 export function wsURL(path: string): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsBase = process.env.NEXT_PUBLIC_WS_BASE;
   const token = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : "";
+  const apiPath = path.replace(/^\/ws\//, "/api/");
+  if (wsBase) {
+    return `${wsBase.replace(/\/$/, "")}${apiPath}${token}`;
+  }
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${path}${token}`;
 }

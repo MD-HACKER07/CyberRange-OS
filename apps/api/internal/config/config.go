@@ -40,9 +40,16 @@ type Config struct {
 	SAMLMetadataURL    string
 	AllowLocalPassword bool
 
-	// Local LLM runtime (Ollama / vLLM / TGI) — never a cloud API.
+	// Local, on-box LLM runtime — never a third-party cloud API.
 	LLMBaseURL          string
 	LLMDefaultModel     string
+	// LLMSOCModel, when set, is a specialized model (e.g. a fine-tune trained
+	// only on SOC alert-triage JSON) bound to the soc-copilot module only.
+	// It is deliberately NOT used for other modules (pentest-copilot,
+	// red-teaming-target, etc.) because a narrow fine-tune can return empty
+	// or unparseable completions for a JSON schema outside its training
+	// distribution — those modules always use LLMDefaultModel instead.
+	LLMSOCModel         string
 	LLMEmbedModel       string
 	LLMRequestTimeout   time.Duration
 	LLMAllowPublicIP    bool // must stay false outside of explicitly-approved lab setups
@@ -117,7 +124,8 @@ func Load() (*Config, error) {
 		AllowLocalPassword: boolean("ALLOW_LOCAL_PASSWORD", true),
 
 		LLMBaseURL:         str("LLM_BASE_URL", "http://localhost:11434"),
-		LLMDefaultModel:    str("LLM_DEFAULT_MODEL", "llama3.1:8b"),
+		LLMDefaultModel:    str("LLM_DEFAULT_MODEL", "cybersec"),
+		LLMSOCModel:        str("LLM_SOC_MODEL", ""),
 		LLMEmbedModel:      str("LLM_EMBED_MODEL", "nomic-embed-text"),
 		LLMRequestTimeout:  dur("LLM_REQUEST_TIMEOUT", 120*time.Second),
 		LLMAllowPublicIP:   boolean("LLM_ALLOW_PUBLIC_IP", false),

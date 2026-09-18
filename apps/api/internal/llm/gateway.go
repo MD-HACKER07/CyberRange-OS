@@ -103,6 +103,9 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis
 	if err := g.ensureDefaultModel(ctx); err != nil {
 		return nil, err
 	}
+	if err := g.reconcileModelModules(ctx); err != nil {
+		return nil, err
+	}
 	return g, nil
 }
 
@@ -136,6 +139,58 @@ func (g *Gateway) ensureDefaultModel(ctx context.Context) error {
 		g.cfg.LLMDefaultModel, g.cfg.LLMBaseURL, "ollama", 8192, Modules,
 		"Auto-registered from LLM_BASE_URL / LLM_DEFAULT_MODEL at first boot.")
 	return err
+}
+
+// reconcileModelModules keeps a specialized SOC fine-tune (LLM_SOC_MODEL)
+// bound ONLY to the soc-copilot module, and makes sure every other module
+// falls back to the general-purpose LLM_DEFAULT_MODEL. This runs on every
+// boot so an admin can change LLM_SOC_MODEL without a manual SQL fix, and
+// so a narrow fine-tune never silently becomes the binding for a module
+// whose JSON schema it was never trained to produce (see LLMSOCModel doc).
+func (g *Gateway) reconcileModelModules(ctx context.Context) error {
+	if g.cfg.LLMSOCModel == "" || g.cfg.LLMSOCModel == g.cfg.LLMDefaultModel {
+		return nil
+	}
+	nonSOCModules := make([]string, 0, len(Modules))
+	for _, m := range Modules {
+		if m != ModuleSOCCopilot {
+			nonSOCModules = append(nonSOCModules, m)
+		}
+	}
+	// Ensure the general-purpose default model has its own registry row for
+	// every module EXCEPT soc-copilot.
+	if _, err := g.pool.Exec(ctx, `
+		INSERT INTO llm_models (name, endpoint, runtime, context_window, modules, is_default, is_active, notes)
+		VALUES ($1,$2,'ollama',8192,$3,TRUE,TRUE,'General-purpose default model; used for every module except soc-copilot.')
+		ON CONFLICT (name, endpoint) DO UPDATE SET modules=$3, is_active=TRUE`,
+		g.cfg.LLMDefaultModel, g.cfg.LLMBaseURL, nonSOCModules); err != nil {
+		return err
+	}
+	// Ensure the specialized SOC fine-tune has its own registry row scoped
+	// to soc-copilot only.
+	if _, err := g.pool.Exec(ctx, `
+		INSERT INTO llm_models (name, endpoint, runtime, context_window, modules, is_default, is_active, notes)
+		VALUES ($1,$2,'ollama',8192,$3,FALSE,TRUE,'Specialized SOC fine-tune (LLM_SOC_MODEL); scoped to soc-copilot only.')
+		ON CONFLICT (name, endpoint) DO UPDATE SET modules=$3, is_active=TRUE`,
+		g.cfg.LLMSOCModel, g.cfg.LLMBaseURL, []string{ModuleSOCCopilot}); err != nil {
+		return err
+	}
+	// Strip soc-copilot off every other model row so the SOC fine-tune is the
+	// only candidate for that module, and strip every non-SOC module off the
+	// SOC model's own row in case it was previously auto-registered for
+	// every module (e.g. by the original ensureDefaultModel seed, or by an
+	// admin manually renaming the row instead of adding a new one).
+	if _, err := g.pool.Exec(ctx, `
+		UPDATE llm_models SET modules = array_remove(modules, $1) WHERE name <> $2`,
+		ModuleSOCCopilot, g.cfg.LLMSOCModel); err != nil {
+		return err
+	}
+	if _, err := g.pool.Exec(ctx, `
+		UPDATE llm_models SET modules = ARRAY(SELECT unnest(modules) INTERSECT SELECT $1::text)
+		WHERE name = $2`, ModuleSOCCopilot, g.cfg.LLMSOCModel); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (g *Gateway) ModelFor(ctx context.Context, module, override string) (ModelBinding, error) {

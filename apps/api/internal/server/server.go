@@ -35,6 +35,7 @@ type Deps struct {
 	Issuer  *auth.TokenIssuer
 	Hub     *realtime.Hub
 	Gateway *llm.Gateway
+	Ingest  *ingest.Service
 
 	// Constructed inside New.
 	authStore    *auth.Store
@@ -60,6 +61,7 @@ func New(d *Deps) *fiber.App {
 	d.closers = append(d.closers, ingestCancel)
 	ingestSvc := ingest.New(d.Cfg, d.store, d.Hub, d.mitreEngine, d.Log)
 	ingestSvc.Start(ingestCtx)
+	d.Ingest = ingestSvc
 
 	// Range provisioner driver selection.
 	switch d.Cfg.RangeDriver {

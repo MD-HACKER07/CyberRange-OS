@@ -60,13 +60,14 @@ export default function LoginPage() {
             Defend like a <span className="text-vault-gold">pro</span>.
           </h1>
           <p className="text-vault-white/60 text-sm leading-relaxed">
-            A self-hosted red team / blue team range with a locally-hosted AI copilot. Every
+            A self-hosted red team / blue team range powered by <span className="text-vault-gold">CyberSec</span>,
+            our own AI model tuned for the Cyber Security department at Sanjivani University. Every
             exercise is supervised, every action logged, and no student data ever leaves the
             institution&apos;s network.
           </p>
         </div>
         <div className="relative z-10 text-xs text-vault-white/40 font-mono">
-          Local inference only · Egress-denied range · NBA/NAAC evidence built-in
+          Sanjivani University · CY Department · Our own on-premise CyberSec model
         </div>
       </div>
 

@@ -25,6 +25,10 @@ func newSIEMHandler(d *Deps) *siemHandler { return &siemHandler{d: d} }
 func (h *siemHandler) register(r fiber.Router) {
 	g := r.Group("/siem")
 	g.Get("/alerts", h.listAlerts)
+	// /alerts/live must be registered before the /alerts/:id family below —
+	// Fiber matches routes in registration order, so :id would otherwise
+	// swallow the literal "live" segment and the WS upgrade would never run.
+	g.Get("/alerts/live", websocket.New(h.liveWS))
 	g.Get("/alerts/:id", h.getAlert)
 	g.Post("/alerts/:id/detect", h.markDetected)
 	g.Post("/alerts/:id/copilot/summarize", h.summarize)
@@ -32,7 +36,6 @@ func (h *siemHandler) register(r fiber.Router) {
 	g.Post("/alerts/:id/ground-truth", auth.RequireRole(auth.RoleFaculty, auth.RoleAdmin), h.setGroundTruth)
 	g.Get("/accuracy", auth.RequireRole(auth.RoleFaculty, auth.RoleAdmin), h.accuracy)
 	g.Get("/metrics", h.metrics)
-	g.Get("/alerts/live", websocket.New(h.liveWS))
 
 	// Playbooks (blue team)
 	g.Get("/playbooks", h.listPlaybooks)

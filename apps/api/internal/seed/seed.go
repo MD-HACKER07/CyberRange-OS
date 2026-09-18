@@ -18,7 +18,7 @@ import (
 	"github.com/cyberrange-os/api/internal/llm"
 )
 
-//go:embed data/*.json
+//go:embed data/*.json data/*.md
 var dataFS embed.FS
 
 type Seeder struct {
@@ -237,7 +237,42 @@ func (s *Seeder) SeedAll(ctx context.Context, embed bool) error {
 			s.log.Warn().Err(err).Msg("demo content seeding incomplete")
 		}
 	}
+	if err := s.SeedDepartmentKnowledge(ctx); err != nil {
+		s.log.Warn().Err(err).Msg("department knowledge seeding incomplete")
+	}
 	return nil
+}
+
+// SeedDepartmentKnowledge loads the Sanjivani Cyber Security department
+// knowledge base (routine, timetables, courses, faculty, platform facts) into
+// the assistant's knowledge-base setting so the CyberSec model can answer
+// department questions. It only seeds when the setting is empty, so a
+// faculty/admin edit from the Assistant page is never overwritten on reboot.
+func (s *Seeder) SeedDepartmentKnowledge(ctx context.Context) error {
+	const key = "assistant_knowledge"
+	var existing int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM platform_settings WHERE key=$1`, key).Scan(&existing); err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil // already set (possibly customised) — do not overwrite
+	}
+	body, err := dataFS.ReadFile("data/department_knowledge.md")
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"content": string(body)})
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO platform_settings (key, value_json, updated_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (key) DO NOTHING`, key, payload)
+	if err == nil {
+		s.log.Info().Msg("department knowledge base seeded for the CyberSec assistant")
+	}
+	return err
 }
 
 func vectorLiteral(vec []float32) string {

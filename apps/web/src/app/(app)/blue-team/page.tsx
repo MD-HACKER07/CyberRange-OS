@@ -73,7 +73,7 @@ export default function BlueTeamConsole() {
     if (!selected) return;
     setBusy(true);
     try {
-      const res = await api<CopilotResult>(`/siem/alerts/${selected.id}/copilot/summarize`, { body: {} });
+      const res = await api<CopilotResult>(`/siem/alerts/${selected.id}/copilot/summarize`, { body: {}, direct: true });
       setCopilot(res);
       if (!label) setLabel(res.verdict);
       if (!note && res.incident_paragraph) setNote(res.incident_paragraph);
@@ -206,7 +206,7 @@ export default function BlueTeamConsole() {
                 >
                   SOC Copilot
                 </SectionTitle>
-                {busy && <Spinner label="Querying local model…" />}
+                {busy && <Spinner label="Querying CyberSec model…" />}
                 {copilot && (
                   <div className="space-y-2 text-sm">
                     <p>{copilot.summary}</p>

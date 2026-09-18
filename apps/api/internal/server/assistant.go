@@ -88,10 +88,11 @@ func (h *assistantHandler) ask(c *fiber.Ctx) error {
 	msgs := []llm.Message{
 		{Role: "system", Content: "KNOWLEDGE BASE:\n" + kb},
 	}
-	// Keep a short rolling window of prior turns for conversational context.
+	// Keep only the last 2 turns of context. On a CPU-only lab box, prompt
+	// prefill dominates latency (~22 tok/s), so a shorter prompt = faster reply.
 	start := 0
-	if len(body.History) > 6 {
-		start = len(body.History) - 6
+	if len(body.History) > 2 {
+		start = len(body.History) - 2
 	}
 	for _, t := range body.History[start:] {
 		role := "user"
@@ -108,7 +109,8 @@ func (h *assistantHandler) ask(c *fiber.Ctx) error {
 		Module:      llm.ModuleAssistant,
 		Messages:    msgs,
 		Temperature: 0.3,
-		MaxTokens:   400,
+		// Cap answer length so generation stays fast on CPU (~4 tok/s).
+		MaxTokens:   200,
 		UserID:      &cur.UserID,
 	})
 	if err != nil {

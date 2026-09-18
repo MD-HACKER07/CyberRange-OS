@@ -2,12 +2,21 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import useSWR from "swr";
-import { Play, Square, Bot, Send, ChevronRight } from "lucide-react";
+import { Play, Square, Bot, Send, ChevronRight, Radar, Crosshair, Swords } from "lucide-react";
 import { api, fetcher, wsURL } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { PageHeader } from "@/components/page-header";
-import { Card, SectionTitle, Button, Badge, Terminal, Timer, Spinner, Input, LiveDot } from "@/components/ui";
-import type { RangeSession, Exercise, CommandLogEntry, Suggestion, ListResponse, Batch } from "@/lib/types";
+import { Card, SectionTitle, Button, Badge, SeverityBadge, Terminal, Timer, Spinner, Input, LiveDot } from "@/components/ui";
+import type {
+  RangeSession,
+  Exercise,
+  CommandLogEntry,
+  Suggestion,
+  AttackDef,
+  DiscoveredHost,
+  ListResponse,
+  Batch,
+} from "@/lib/types";
 
 export default function RedTeamConsole() {
   const { user } = useAuth();
@@ -113,7 +122,13 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
   const [manualCmd, setManualCmd] = useState("");
   const [editCmd, setEditCmd] = useState("");
   const [question, setQuestion] = useState("");
+  const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState<DiscoveredHost | null>(null);
+  const [attacking, setAttacking] = useState("");
   const termRef = useRef<HTMLDivElement>(null);
+
+  const { data: attacksData } = useSWR<{ items: AttackDef[] }>(`/range-sessions/${session.id}/attacks`, fetcher);
 
   const { data: cmdLog, mutate: mutateLog } = useSWR<ListResponse<CommandLogEntry>>(
     `/range-sessions/${session.id}/commands`,
@@ -129,6 +144,19 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
     fetcher,
     { refreshInterval: 5000 },
   );
+
+  // Registered targets are already known without scanning; a scan can still
+  // reveal additional/undocumented hosts on the same isolated subnet.
+  useEffect(() => {
+    setDiscovered((prev) => {
+      const known = new Set(prev.map((d) => d.ip_address));
+      const seeded = (session.targets ?? [])
+        .filter((t) => t.ip_address && !known.has(t.ip_address))
+        .map((t) => ({ ip_address: t.ip_address, hostname: t.hostname }));
+      return seeded.length ? [...prev, ...seeded] : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
 
   // Seed terminal with historical command log.
   useEffect(() => {
@@ -179,7 +207,7 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
     try {
       const res = await api<{ suggestion: Suggestion; expected_outcome: string }>(
         `/range-sessions/${session.id}/copilot/suggest`,
-        { body: { question } },
+        { body: { question }, direct: true },
       );
       setSuggestion(res.suggestion);
       setEditCmd(res.suggestion.command);
@@ -198,6 +226,7 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
     try {
       await api(`/range-sessions/${session.id}/copilot/execute`, {
         body: { suggestion_id: suggestion.id, command: modified ? editCmd : "" },
+        direct: true,
       });
       setSuggestion(null);
       setExpectedOutcome("");
@@ -217,6 +246,41 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
       mutateLog();
     } catch (err) {
       setLines((prev) => [...prev, { kind: "sys", text: `[exec error] ${err instanceof Error ? err.message : ""}` }]);
+    }
+  };
+
+  // Step 1: scan the range's isolated subnet to see who is on the network.
+  const scanNetwork = async () => {
+    setScanning(true);
+    setSelectedTarget(null);
+    try {
+      const res = await api<{ discovered_hosts: DiscoveredHost[] }>(`/range-sessions/${session.id}/scan`, {
+        body: {},
+      });
+      setDiscovered(res.discovered_hosts ?? []);
+      mutateLog();
+    } catch (e) {
+      setLines((prev) => [...prev, { kind: "sys", text: `[scan error] ${e instanceof Error ? e.message : ""}` }]);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Step 3: launch a canned attack against the selected target's real IP.
+  // The API executes the real tool in the Kali container and raises a real,
+  // correlated SIEM alert the Blue Team sees live.
+  const launchAttack = async (attackId: string) => {
+    if (!selectedTarget) return;
+    setAttacking(attackId);
+    try {
+      await api(`/range-sessions/${session.id}/attack`, {
+        body: { attack_id: attackId, target_ip: selectedTarget.ip_address },
+      });
+      mutateLog();
+    } catch (e) {
+      setLines((prev) => [...prev, { kind: "sys", text: `[attack error] ${e instanceof Error ? e.message : ""}` }]);
+    } finally {
+      setAttacking("");
     }
   };
 
@@ -273,11 +337,24 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
         </Card>
       </div>
 
-      {/* Center: terminal + copilot */}
+      {/* Center: attack flow + terminal + copilot */}
       <div className="col-span-6 flex flex-col gap-3 min-h-0">
         <div className="flex items-center gap-2 text-xs text-vault-white/50">
           <LiveDot accent="red" /> kali-attacker · live
         </div>
+
+        <AttackPanel
+          subnet={session.subnet}
+          discovered={discovered}
+          scanning={scanning}
+          selectedTarget={selectedTarget}
+          onScan={scanNetwork}
+          onSelectTarget={setSelectedTarget}
+          attacks={attacksData?.items ?? []}
+          attacking={attacking}
+          onLaunch={launchAttack}
+        />
+
         <div ref={termRef} className="flex-1 min-h-0">
           <Terminal>
             {lines.map((l, i) => (
@@ -298,18 +375,25 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
             ))}
           </Terminal>
         </div>
-        <ToolPalette target={session.targets?.[0]?.hostname || "TARGET"} onPick={setManualCmd} />
-        <form onSubmit={runManual} className="flex gap-2">
-          <Input
-            value={manualCmd}
-            onChange={(e) => setManualCmd(e.target.value)}
-            placeholder="Type a command to run in Kali…"
-            className="font-mono"
-          />
-          <Button type="submit" variant="outline">
-            Run
-          </Button>
-        </form>
+        <details className="text-xs">
+          <summary className="cursor-pointer text-vault-white/50 hover:text-vault-gold">
+            Advanced: manual terminal &amp; tool templates
+          </summary>
+          <div className="mt-2 space-y-2">
+            <ToolPalette target={session.targets?.[0]?.hostname || "TARGET"} onPick={setManualCmd} />
+            <form onSubmit={runManual} className="flex gap-2">
+              <Input
+                value={manualCmd}
+                onChange={(e) => setManualCmd(e.target.value)}
+                placeholder="Type a command to run in Kali…"
+                className="font-mono"
+              />
+              <Button type="submit" variant="outline">
+                Run
+              </Button>
+            </form>
+          </div>
+        </details>
       </div>
 
       {/* Right: copilot + MITRE tracker */}
@@ -382,6 +466,105 @@ function SessionConsole({ session, onEnded }: { session: RangeSession; onEnded: 
         </Card>
       </div>
     </div>
+  );
+}
+
+// AttackPanel is the guided click-to-attack flow: 1) scan the range's own
+// isolated subnet to see who is on the network, 2) select a discovered
+// target, 3) pick a canned attack. Every step runs a real tool in the Kali
+// container against the range's real isolated network — nothing simulated —
+// and each attack raises a real, correlated alert the Blue Team sees live.
+function AttackPanel({
+  subnet,
+  discovered,
+  scanning,
+  selectedTarget,
+  onScan,
+  onSelectTarget,
+  attacks,
+  attacking,
+  onLaunch,
+}: {
+  subnet: string;
+  discovered: DiscoveredHost[];
+  scanning: boolean;
+  selectedTarget: DiscoveredHost | null;
+  onScan: () => void;
+  onSelectTarget: (t: DiscoveredHost) => void;
+  attacks: AttackDef[];
+  attacking: string;
+  onLaunch: (attackId: string) => void;
+}) {
+  return (
+    <Card accent="red">
+      <SectionTitle accent="red">
+        <span className="flex items-center gap-2">
+          <Swords size={14} /> Attack Flow
+        </span>
+      </SectionTitle>
+      <div className="space-y-3">
+        {/* Step 1: scan */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-vault-white/50 flex items-center gap-1">
+              <Radar size={12} /> 1. Scan the network ({subnet || "isolated subnet"})
+            </span>
+            <Button variant="outline" onClick={onScan} disabled={scanning}>
+              {scanning ? "Scanning…" : "Scan Network"}
+            </Button>
+          </div>
+          {discovered.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {discovered.map((h) => (
+                <button
+                  key={h.ip_address}
+                  onClick={() => onSelectTarget(h)}
+                  className={`text-xs px-2 py-1 rounded border font-mono flex items-center gap-1 ${
+                    selectedTarget?.ip_address === h.ip_address
+                      ? "border-vault-gold text-vault-gold bg-vault-gold/10"
+                      : "border-vault-red/30 text-vault-white/70 hover:bg-vault-red/10"
+                  }`}
+                >
+                  <Crosshair size={10} />
+                  {h.hostname || h.ip_address}
+                  <span className="text-vault-white/40">{h.ip_address}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Step 2/3: target + attack */}
+        <div>
+          <div className="text-xs text-vault-white/50 mb-1 flex items-center gap-1">
+            <Crosshair size={12} /> 2. Select target, then 3. launch an attack
+          </div>
+          {!selectedTarget ? (
+            <p className="text-xs text-vault-white/40">Scan the network and pick a host above.</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-xs font-mono text-vault-gold">
+                Target: {selectedTarget.hostname || "unknown"} ({selectedTarget.ip_address})
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                {attacks.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => onLaunch(a.id)}
+                    disabled={attacking !== ""}
+                    title={a.description}
+                    className="text-left text-xs px-2 py-1.5 rounded border border-vault-red/30 hover:bg-vault-red/10 disabled:opacity-40 flex items-center justify-between gap-1"
+                  >
+                    <span className="text-vault-white/80">{attacking === a.id ? "Attacking…" : a.label}</span>
+                    <SeverityBadge severity={a.severity} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 

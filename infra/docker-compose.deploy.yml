@@ -1,12 +1,12 @@
-# CyberRange OS — single-server deployment (host it all on the Ubuntu box).
+# CyberRange OS — single-server deployment.
 #
 # Brings up the core platform: PostgreSQL (with pgvector), Redis, the Go API,
-# and the Next.js web app. It REUSES the Ollama already running natively on the
-# host (reached via host.docker.internal, which resolves to the private Docker
-# bridge gateway — so the local-inference egress guard passes without override).
+# and the Next.js web app. It reaches the on-host local inference runtime via
+# host.docker.internal (the private Docker bridge gateway), so the CyberSec
+# model stays fully on-box and the local-inference egress guard passes.
 #
-# Heavy optional services (Wazuh, Suricata, Guacamole, Prometheus, Grafana)
-# live in docker-compose.yml behind their own setup; add them later.
+# Heavy optional services (SIEM/IDS, terminal proxy, metrics) live in
+# docker-compose.yml behind their own setup; add them later.
 #
 # Usage on the server (from the repo root):
 #   docker compose -f infra/docker-compose.deploy.yml --env-file .env.deploy up -d --build
@@ -46,9 +46,10 @@ services:
       DATABASE_URL: postgres://cyberrange:${POSTGRES_PASSWORD:-cyberrange}@postgres:5432/cyberrange?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.deploy}
-      # Native Ollama on the host; host.docker.internal -> private bridge gateway.
+      # On-host local inference runtime; host.docker.internal -> private bridge gateway.
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434}
-      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-llama3.2:3b}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-cybersec}
+      LLM_SOC_MODEL: ${LLM_SOC_MODEL:-}
       LLM_EMBED_MODEL: ${LLM_EMBED_MODEL:-nomic-embed-text}
       LLM_ALLOW_PUBLIC_IP: "false"
       LLM_REQUEST_TIMEOUT: 180s
@@ -71,6 +72,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock   # orchestrator provisions ranges here
       - storage:/data/storage
       - suricata-logs:/var/log/suricata:ro          # Blue Team reads IDS telemetry here
+    ports:
+      # Exposed on the host so the browser's WebSocket clients (Red Team
+      # terminal, Blue Team live alerts) can connect directly — Next.js's
+      # rewrites() only proxies plain HTTP, not the WS upgrade handshake.
+      - "8080:8080"
     restart: unless-stopped
 
   web:
@@ -78,9 +84,12 @@ services:
       context: ../apps/web
       dockerfile: Dockerfile
       args:
-        # The Next.js server proxies /api and /ws to the API service on the
-        # compose network. This value is baked into the rewrite at build time.
+        # The Next.js server proxies /api to the API service on the compose
+        # network for plain HTTP requests (baked into the rewrite).
         NEXT_PUBLIC_API_BASE: http://api:8080
+        # Browser WebSocket clients connect straight to the API's public
+        # port instead — see apps/web/src/lib/api.ts#wsURL.
+        NEXT_PUBLIC_WS_BASE: ${PUBLIC_WS_BASE:-}
     depends_on:
       - api
     ports:

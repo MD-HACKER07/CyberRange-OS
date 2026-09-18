@@ -42,6 +42,9 @@ func (h *rangeHandler) register(r fiber.Router) {
 	g.Post("/:id/copilot/execute", h.copilotExecute)
 	g.Post("/:id/exec", h.execManual)
 	g.Get("/:id/stats", h.stats)
+	g.Get("/:id/attacks", h.listAttacks)
+	g.Post("/:id/scan", h.scan)
+	g.Post("/:id/attack", h.attack)
 
 	// Live terminal + copilot stream (token passed via ?access_token= by the browser).
 	g.Get("/:id/terminal", websocket.New(h.terminalWS))
@@ -190,7 +193,7 @@ func (h *rangeHandler) provision(sessionID, userID uuid.UUID, specs []orchestrat
 		})
 	}
 	terminalToken := auth.RandomSecret(24)
-	if err := h.d.store.MarkSessionRunning(ctx, sessionID, rng.NetworkID, rng.NetworkName, rng.AttackerID, rng.AttackerName, terminalToken); err != nil {
+	if err := h.d.store.MarkSessionRunning(ctx, sessionID, rng.NetworkID, rng.NetworkName, rng.AttackerID, rng.AttackerName, rng.AttackerIP, rng.Subnet, terminalToken); err != nil {
 		h.d.Log.Error().Err(err).Msg("failed to mark session running")
 	}
 	h.d.Hub.Publish(ctx, realtime.ChannelTerminal(sessionID.String()), "session.running",
@@ -479,11 +482,23 @@ func (h *rangeHandler) execManual(c *fiber.Ctx) error {
 }
 
 func (h *rangeHandler) runAndLog(c *fiber.Ctx, sess *store.RangeSession, command string, aiSuggested bool, rationale, technique string, modified bool) error {
+	entry, err := h.execCore(c, sess, command, aiSuggested, rationale, technique, modified)
+	if err != nil {
+		return err
+	}
+	return httpx.OK(c, entry)
+}
+
+// execCore runs a command in the session's attacker container and logs it as
+// evidence. It is the single execution path shared by manual exec, copilot
+// execute, and the canned-attack launcher (attacks.go) so every command —
+// however it was initiated — is captured identically for grading/audit.
+func (h *rangeHandler) execCore(c *fiber.Ctx, sess *store.RangeSession, command string, aiSuggested bool, rationale, technique string, modified bool) (*store.CommandLogEntry, error) {
 	if sess.Status != "running" {
-		return httpx.BadRequest("session is not running")
+		return nil, httpx.BadRequest("session is not running")
 	}
 	if h.d.provisioner == nil {
-		return httpx.Unavailable("orchestrator unavailable")
+		return nil, httpx.Unavailable("orchestrator unavailable")
 	}
 	cur, _ := auth.MustCurrent(c)
 
@@ -494,7 +509,7 @@ func (h *rangeHandler) runAndLog(c *fiber.Ctx, sess *store.RangeSession, command
 	result, err := h.d.provisioner.Exec(execCtx, sess.AttackerID, command)
 	dur := int(time.Since(start).Milliseconds())
 	if err != nil {
-		return httpx.Unavailable("command execution failed: " + err.Error())
+		return nil, httpx.Unavailable("command execution failed: " + err.Error())
 	}
 
 	output := result.Stdout
@@ -503,7 +518,7 @@ func (h *rangeHandler) runAndLog(c *fiber.Ctx, sess *store.RangeSession, command
 	}
 	exit := result.ExitCode
 
-	// Auto-tag with MITRE if the copilot didn't already provide a technique.
+	// Auto-tag with MITRE if the caller didn't already provide a technique.
 	if technique == "" {
 		if tech, conf, terr := h.d.mitreEngine.Tag(execCtx, command); terr == nil && conf >= 0.4 {
 			technique = tech
@@ -521,7 +536,7 @@ func (h *rangeHandler) runAndLog(c *fiber.Ctx, sess *store.RangeSession, command
 		WasModified: modified, DurationMS: dur,
 	})
 	if err != nil {
-		return httpx.Internal("failed to log command")
+		return nil, httpx.Internal("failed to log command")
 	}
 
 	h.d.Audit.Write(c.Context(), audit.Entry{
@@ -531,7 +546,7 @@ func (h *rangeHandler) runAndLog(c *fiber.Ctx, sess *store.RangeSession, command
 	})
 
 	h.d.Hub.Publish(c.Context(), realtime.ChannelTerminal(sess.ID.String()), "command.result", entry)
-	return httpx.OK(c, entry)
+	return entry, nil
 }
 
 // ------------------------------------------------------------------ terminal WS

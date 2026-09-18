@@ -34,11 +34,11 @@ export default function ReportsPage() {
         subtitle="Pentest and incident reports, graded against faculty rubrics"
         actions={
           <div className="flex gap-2">
-            <Link href={`/reports/portfolio/${user?.id}`}>
+            <a href={`/api/reports/portfolio/${user?.id}`} target="_blank" rel="noreferrer">
               <Button variant="outline">
                 <Download size={16} /> Portfolio PDF
               </Button>
-            </Link>
+            </a>
             <Button onClick={createBlank} disabled={creating}>
               <Plus size={16} /> New Report
             </Button>

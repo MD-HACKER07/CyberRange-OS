@@ -94,6 +94,8 @@ type RangeSession struct {
 	NetworkName     string     `json:"network_name"`
 	AttackerID      string     `json:"-"`
 	AttackerName    string     `json:"attacker_name"`
+	AttackerIP      string     `json:"attacker_ip"`
+	Subnet          string     `json:"subnet"`
 	TerminalToken   string     `json:"terminal_token,omitempty"`
 	Driver          string     `json:"driver"`
 	TotalActions    int        `json:"total_actions"`
@@ -121,13 +123,13 @@ type SessionTarget struct {
 }
 
 const sessionCols = `id, exercise_id, user_id, status, network_id, network_name, attacker_id, attacker_name,
-	terminal_token, driver, total_actions, ai_actions, assistance_ratio, llm_tokens_used, xp_awarded,
+	attacker_ip, subnet, terminal_token, driver, total_actions, ai_actions, assistance_ratio, llm_tokens_used, xp_awarded,
 	failure_reason, expires_at, started_at, ended_at`
 
 func scanSession(row pgx.Row) (*RangeSession, error) {
 	var s RangeSession
 	err := row.Scan(&s.ID, &s.ExerciseID, &s.UserID, &s.Status, &s.NetworkID, &s.NetworkName, &s.AttackerID,
-		&s.AttackerName, &s.TerminalToken, &s.Driver, &s.TotalActions, &s.AIActions, &s.AssistanceRatio,
+		&s.AttackerName, &s.AttackerIP, &s.Subnet, &s.TerminalToken, &s.Driver, &s.TotalActions, &s.AIActions, &s.AssistanceRatio,
 		&s.LLMTokensUsed, &s.XPAwarded, &s.FailureReason, &s.ExpiresAt, &s.StartedAt, &s.EndedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -185,10 +187,11 @@ func (s *Store) AddSessionTarget(ctx context.Context, t SessionTarget) error {
 	return err
 }
 
-func (s *Store) MarkSessionRunning(ctx context.Context, id uuid.UUID, networkID, networkName, attackerID, attackerName, terminalToken string) error {
+func (s *Store) MarkSessionRunning(ctx context.Context, id uuid.UUID, networkID, networkName, attackerID, attackerName, attackerIP, subnet, terminalToken string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE range_sessions SET status='running', network_id=$2, network_name=$3, attacker_id=$4, attacker_name=$5, terminal_token=$6
-		WHERE id=$1`, id, networkID, networkName, attackerID, attackerName, terminalToken)
+		UPDATE range_sessions SET status='running', network_id=$2, network_name=$3, attacker_id=$4, attacker_name=$5,
+			attacker_ip=$6, subnet=$7, terminal_token=$8
+		WHERE id=$1`, id, networkID, networkName, attackerID, attackerName, attackerIP, subnet, terminalToken)
 	return err
 }
 
